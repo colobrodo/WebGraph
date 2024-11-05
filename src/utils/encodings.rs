@@ -224,12 +224,12 @@ impl Huffman for Huff {
 /*************** Zuckerli encoding follows ***************/
 
 pub const K_ZUCK: usize = 4;
-// pub const I_ZUCK: usize = 2;
-// pub const J_ZUCK: usize = 1;
+pub const I_ZUCK: usize = 2;
+pub const J_ZUCK: usize = 1;
 // NOTE: replace i and j parameter to be consistent with
 //      the ones in the paper
-pub const I_ZUCK: usize = 1;
-pub const J_ZUCK: usize = 0;
+// pub const I_ZUCK: usize = 1;
+// pub const J_ZUCK: usize = 0;
 
 #[inline(always)]
 pub fn zuck_decode(
