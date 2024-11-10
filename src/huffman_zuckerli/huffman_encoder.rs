@@ -1,21 +1,28 @@
 use std::mem::take;
 
-use crate::{huffman_zuckerli::{HuffmanSymbolInfo, K_MAX_HUFFMAN_BITS, K_MAX_NUM_CONTEXTS, K_NUM_SYMBOLS}, bitstreams::BinaryWriter, utils::encodings::{zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}};
+use crate::{
+    bitstreams::BinaryWriter,
+    huffman_zuckerli::{HuffmanSymbolInfo, K_MAX_HUFFMAN_BITS, K_MAX_NUM_CONTEXTS, K_NUM_SYMBOLS},
+    utils::encodings::{zuck_encode, I_ZUCK, J_ZUCK, K_ZUCK},
+};
 
 use super::Huffman;
 
 pub struct HuffmanEncoder {
     info_: [[HuffmanSymbolInfo; 1 << K_MAX_HUFFMAN_BITS]; K_MAX_NUM_CONTEXTS],
+    pub(crate) bits_per_context: [u64; K_MAX_NUM_CONTEXTS],
 }
 
 impl Default for HuffmanEncoder {
     fn default() -> Self {
-        Self { info_: [[HuffmanSymbolInfo::default(); 1 << K_MAX_HUFFMAN_BITS]; K_MAX_NUM_CONTEXTS] }
+        Self {
+            info_: [[HuffmanSymbolInfo::default(); 1 << K_MAX_HUFFMAN_BITS]; K_MAX_NUM_CONTEXTS],
+            bits_per_context: [0; K_MAX_NUM_CONTEXTS],
+        }
     }
 }
 
 impl Huffman for HuffmanEncoder {}
-
 
 impl HuffmanEncoder {
     pub fn new() -> Self {
@@ -24,7 +31,7 @@ impl HuffmanEncoder {
 
     /// Computes the optimal number of bits for each symbol given the input
     /// distribution. Uses a (quadratic version) of the package-merge/coin-collector
-    /// algorithm. 
+    /// algorithm.
     fn compute_symbol_num_bits(&mut self, histo: &[u64], ctx: usize) {
         // Mark the present/missing symbols.
         let mut nzsym = 0;
@@ -69,7 +76,7 @@ impl HuffmanEncoder {
             let mut j = 0;
             while j + 1 < bags[i].len() {
                 let nf = bags[i][j].0 + bags[i][j + 1].0;
-                
+
                 let mut nsym = take(&mut bags[i][j].1);
                 // swap(&mut nsym, &mut bags[i][j].1);
 
@@ -101,10 +108,10 @@ impl HuffmanEncoder {
             if inf.present == 0 {
                 continue;
             }
-            
+
             cost_check += 1 << (K_MAX_HUFFMAN_BITS - inf.nbits as usize);
         }
-        
+
         assert!(cost_check == 1 << K_MAX_HUFFMAN_BITS);
     }
 
@@ -119,7 +126,7 @@ impl HuffmanEncoder {
         }
 
         writer.push_bits(ms as u64, 8);
-        
+
         for inf in self.info_[ctx].iter().take(ms + 1) {
             if inf.present == 1 {
                 writer.push_bits(1, 1);
@@ -132,7 +139,10 @@ impl HuffmanEncoder {
 
     pub fn init(&mut self, integers: &[Vec<usize>], bin_writer: &mut BinaryWriter) {
         let num_contexts = integers.len();
-        assert!(num_contexts < K_MAX_NUM_CONTEXTS, "The number of contexts has to be smaller than {K_MAX_NUM_CONTEXTS}");
+        assert!(
+            num_contexts < K_MAX_NUM_CONTEXTS,
+            "The number of contexts has to be smaller than {K_MAX_NUM_CONTEXTS}"
+        );
 
         let mut histograms = vec![[0; K_NUM_SYMBOLS]; num_contexts];
 
@@ -153,10 +163,12 @@ impl HuffmanEncoder {
     }
 
     #[inline(always)]
-    pub fn write_next(&self, value: usize, bin_writer: &mut BinaryWriter, ctx: usize) {
+    pub fn write_next(&mut self, value: usize, bin_writer: &mut BinaryWriter, ctx: usize) {
         let (token, nbits, bits) = zuck_encode(value, K_ZUCK, I_ZUCK, J_ZUCK);
         debug_assert!(self.info_[ctx][token].present == 1, "Unknown value {value}");
-        bin_writer.push_bits(self.info_[ctx][token].bits as u64, self.info_[ctx][token].nbits as u64);
+        let nbits_per_token = self.info_[ctx][token].nbits as u64;
+        bin_writer.push_bits(self.info_[ctx][token].bits as u64, nbits_per_token);
         bin_writer.push_bits(bits as u64, nbits as u64);
+        self.bits_per_context[ctx] += nbits_per_token + nbits as u64;
     }
 }

@@ -1,16 +1,39 @@
-use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc::Rc, borrow::BorrowMut, time::Instant, collections::HashMap};
+use std::{
+    borrow::BorrowMut,
+    cell::{Cell, RefCell},
+    cmp::Ordering,
+    collections::HashMap,
+    fs,
+    marker::PhantomData,
+    rc::Rc,
+    time::Instant,
+    vec,
+};
 
-use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
+use sucds::{
+    mii_sequences::{EliasFano, EliasFanoBuilder},
+    Serializable,
+};
 
-use crate::{ImmutableGraph, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, ZetaCode, Huffman, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, nat2int, int2nat}, huffman_zuckerli::{huffman_encoder::HuffmanEncoder, K_NUM_SYMBOLS}};
 use crate::bitstreams::{BinaryReader, BinaryWriter};
+use crate::{
+    huffman_zuckerli::{huffman_encoder::HuffmanEncoder, K_NUM_SYMBOLS},
+    properties::Properties,
+    utils::{
+        encodings::{
+            zuck_encode, GammaCode, Huffman, UniversalCode, ZetaCode, I_ZUCK, J_ZUCK, K_ZUCK,
+        },
+        int2nat, nat2int,
+    },
+    ImmutableGraph,
+};
 
 pub const FIRST_DEGREE_CTX: usize = 0;
 pub const DEGREE_BASE_CTX: usize = 1;
 pub const NUM_DEGREE_CTX: usize = 32;
 pub const REFERENCE_BASE_CTX: usize = DEGREE_BASE_CTX + NUM_DEGREE_CTX;
 pub const NUM_REFERENCE_CTX: usize = 64;
-pub const BLOCK_COUNT_CTX: usize = REFERENCE_BASE_CTX + NUM_REFERENCE_CTX; 
+pub const BLOCK_COUNT_CTX: usize = REFERENCE_BASE_CTX + NUM_REFERENCE_CTX;
 pub const BLOCK_CTX: usize = BLOCK_COUNT_CTX + 1;
 pub const BLOCK_CTX_EVEN: usize = BLOCK_CTX + 1;
 pub const BLOCK_CTX_ODD: usize = BLOCK_CTX_EVEN + 1;
@@ -83,36 +106,37 @@ pub struct BVGraph<
 }
 
 impl<
-    InBlockCoding: UniversalCode,
-    InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
-    InOffsetCoding: UniversalCode,
-    InReferenceCoding: UniversalCode,
-    InIntervalCoding: UniversalCode,
-    InResidualCoding: UniversalCode,
-    OutBlockCoding: Huffman,
-    OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: Huffman,
-    OutOffsetCoding: UniversalCode,
-    OutReferenceCoding: UniversalCode,
-    OutIntervalCoding: Huffman,
-    OutResidualCoding: Huffman,
-> ImmutableGraph for BVGraph<
-    InBlockCoding,
-    InBlockCountCoding,
-    InOutdegreeCoding,
-    InOffsetCoding,
-    InReferenceCoding,
-    InIntervalCoding,
-    InResidualCoding,
-    OutBlockCoding,
-    OutBlockCountCoding,
-    OutOutdegreeCoding,
-    OutOffsetCoding,
-    OutReferenceCoding,
-    OutIntervalCoding,
-    OutResidualCoding,
->
+        InBlockCoding: UniversalCode,
+        InBlockCountCoding: UniversalCode,
+        InOutdegreeCoding: UniversalCode,
+        InOffsetCoding: UniversalCode,
+        InReferenceCoding: UniversalCode,
+        InIntervalCoding: UniversalCode,
+        InResidualCoding: UniversalCode,
+        OutBlockCoding: Huffman,
+        OutBlockCountCoding: UniversalCode,
+        OutOutdegreeCoding: Huffman,
+        OutOffsetCoding: UniversalCode,
+        OutReferenceCoding: UniversalCode,
+        OutIntervalCoding: Huffman,
+        OutResidualCoding: Huffman,
+    > ImmutableGraph
+    for BVGraph<
+        InBlockCoding,
+        InBlockCountCoding,
+        InOutdegreeCoding,
+        InOffsetCoding,
+        InReferenceCoding,
+        InIntervalCoding,
+        InResidualCoding,
+        OutBlockCoding,
+        OutBlockCountCoding,
+        OutOutdegreeCoding,
+        OutOffsetCoding,
+        OutReferenceCoding,
+        OutIntervalCoding,
+        OutResidualCoding,
+    >
 {
     type NodeT = usize;
 
@@ -129,36 +153,49 @@ impl<
     }
 
     /// Returns the outdegree of a given node or `None` otherwise.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `x` - The node number
     fn outdegree(&self, x: Self::NodeT) -> Option<usize> {
         if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
             return self.cached_outdegree.get();
         }
-        
+
         if x >= self.n {
             return None;
         }
 
-        self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
-        
+        self.outdegrees_binary_wrapper
+            .borrow_mut()
+            .position(self.offsets[x] as u64);
+
         self.cached_node.set(Some(x));
-        self.cached_outdegree.set(Some(InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.in_zeta_k) as usize));
-        self.cached_ptr.set(Some(self.outdegrees_binary_wrapper.borrow_mut().get_position()));
+        self.cached_outdegree.set(Some(InOutdegreeCoding::read_next(
+            &mut self.outdegrees_binary_wrapper.borrow_mut(),
+            self.in_zeta_k,
+        ) as usize));
+        self.cached_ptr.set(Some(
+            self.outdegrees_binary_wrapper.borrow_mut().get_position(),
+        ));
 
         self.cached_outdegree.get()
     }
 
     /// Returns the list of successors of a given node.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `x` - The node number
     fn successors(&self, x: usize) -> Box<[Self::NodeT]> {
         assert!(x < self.n, "Node index out of range {}", x);
-        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut []).into_boxed_slice()
+        self.decode_list(
+            x,
+            &mut self.graph_binary_wrapper.borrow_mut(),
+            None,
+            &mut [],
+        )
+        .into_boxed_slice()
     }
 
     fn store(&mut self, basename: &str) -> std::io::Result<()> {
@@ -166,7 +203,7 @@ impl<
         let mut offsets_obs = BinaryWriter::new();
 
         self.compress(&mut graph_obs, &mut offsets_obs);
-        
+
         let graph = graph_obs.build();
         let offsets = offsets_obs.build();
         let props = Properties {
@@ -182,12 +219,15 @@ impl<
             interval_coding: OutIntervalCoding::to_encoding_type(),
             reference_coding: OutReferenceCoding::to_encoding_type(),
             block_count_coding: OutBlockCountCoding::to_encoding_type(),
-            offset_coding: OutOffsetCoding::to_encoding_type()
+            offset_coding: OutOffsetCoding::to_encoding_type(),
         };
 
         fs::write(format!("{}.graph", basename), graph.os).unwrap();
         fs::write(format!("{}.offsets", basename), offsets.os).unwrap();
-        fs::write(format!("{}.properties", basename), Into::<String>::into(props))?;
+        fs::write(
+            format!("{}.properties", basename),
+            Into::<String>::into(props),
+        )?;
 
         Ok(())
     }
@@ -208,23 +248,25 @@ pub struct BVGraphNodeIterator<
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: Huffman,
     OutResidualCoding: Huffman,
-    BV: AsRef<BVGraph<
-        InBlockCoding,
-        InBlockCountCoding,
-        InOutdegreeCoding,
-        InOffsetCoding,
-        InReferenceCoding,
-        InIntervalCoding,
-        InResidualCoding,
-        OutBlockCoding,
-        OutBlockCountCoding,
-        OutOutdegreeCoding,
-        OutOffsetCoding,
-        OutReferenceCoding,
-        OutIntervalCoding,
-        OutResidualCoding,
->>>
-{
+    BV: AsRef<
+        BVGraph<
+            InBlockCoding,
+            InBlockCountCoding,
+            InOutdegreeCoding,
+            InOffsetCoding,
+            InReferenceCoding,
+            InIntervalCoding,
+            InResidualCoding,
+            OutBlockCoding,
+            OutBlockCountCoding,
+            OutOutdegreeCoding,
+            OutOffsetCoding,
+            OutReferenceCoding,
+            OutIntervalCoding,
+            OutResidualCoding,
+        >,
+    >,
+> {
     // The number of nodes
     n: usize,
     // The graph on which we iterate
@@ -258,21 +300,40 @@ pub struct BVGraphNodeIterator<
 }
 
 impl<
-    InBlockCoding: UniversalCode,
-    InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
-    InOffsetCoding: UniversalCode,
-    InReferenceCoding: UniversalCode,
-    InIntervalCoding: UniversalCode,
-    InResidualCoding: UniversalCode,
-    OutBlockCoding: Huffman,
-    OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: Huffman,
-    OutOffsetCoding: UniversalCode,
-    OutReferenceCoding: UniversalCode,
-    OutIntervalCoding: Huffman,
-    OutResidualCoding: Huffman,
-    BV: AsRef<BVGraph<
+        InBlockCoding: UniversalCode,
+        InBlockCountCoding: UniversalCode,
+        InOutdegreeCoding: UniversalCode,
+        InOffsetCoding: UniversalCode,
+        InReferenceCoding: UniversalCode,
+        InIntervalCoding: UniversalCode,
+        InResidualCoding: UniversalCode,
+        OutBlockCoding: Huffman,
+        OutBlockCountCoding: UniversalCode,
+        OutOutdegreeCoding: Huffman,
+        OutOffsetCoding: UniversalCode,
+        OutReferenceCoding: UniversalCode,
+        OutIntervalCoding: Huffman,
+        OutResidualCoding: Huffman,
+        BV: AsRef<
+            BVGraph<
+                InBlockCoding,
+                InBlockCountCoding,
+                InOutdegreeCoding,
+                InOffsetCoding,
+                InReferenceCoding,
+                InIntervalCoding,
+                InResidualCoding,
+                OutBlockCoding,
+                OutBlockCountCoding,
+                OutOutdegreeCoding,
+                OutOffsetCoding,
+                OutReferenceCoding,
+                OutIntervalCoding,
+                OutResidualCoding,
+            >,
+        >,
+    > Iterator
+    for BVGraphNodeIterator<
         InBlockCoding,
         InBlockCountCoding,
         InOutdegreeCoding,
@@ -287,23 +348,9 @@ impl<
         OutReferenceCoding,
         OutIntervalCoding,
         OutResidualCoding,
->>> Iterator for BVGraphNodeIterator<
-        InBlockCoding,
-        InBlockCountCoding,
-        InOutdegreeCoding,
-        InOffsetCoding,
-        InReferenceCoding,
-        InIntervalCoding,
-        InResidualCoding,
-        OutBlockCoding,
-        OutBlockCountCoding,
-        OutOutdegreeCoding,
-        OutOffsetCoding,
-        OutReferenceCoding,
-        OutIntervalCoding,
-        OutResidualCoding,
-        BV
-> {
+        BV,
+    >
+{
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -313,15 +360,20 @@ impl<
 
         self.curr += 1;
         let curr_idx = self.curr as usize % self.cyclic_buffer_size;
-        let decoded_list = self.graph.as_ref().decode_list(self.curr as usize, &mut self.ibs, Some(&mut self.window), &mut self.outd);
+        let decoded_list = self.graph.as_ref().decode_list(
+            self.curr as usize,
+            &mut self.ibs,
+            Some(&mut self.window),
+            &mut self.outd,
+        );
 
         let d = self.outd[curr_idx];
 
         if self.window[curr_idx].len() < d {
             self.window[curr_idx] = vec![0usize; d];
         }
-        
-        let mut i = 0; 
+
+        let mut i = 0;
         while i < d && i < decoded_list.len() {
             self.window[curr_idx][i] = decoded_list[i];
             i += 1;
@@ -329,24 +381,43 @@ impl<
 
         Some(self.curr as usize)
     }
-} 
+}
 
 impl<
-    InBlockCoding: UniversalCode,
-    InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
-    InOffsetCoding: UniversalCode,
-    InReferenceCoding: UniversalCode,
-    InIntervalCoding: UniversalCode,
-    InResidualCoding: UniversalCode,
-    OutBlockCoding: Huffman,
-    OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: Huffman,
-    OutOffsetCoding: UniversalCode,
-    OutReferenceCoding: UniversalCode,
-    OutIntervalCoding: Huffman,
-    OutResidualCoding: Huffman,
-    BV: AsRef<BVGraph<
+        InBlockCoding: UniversalCode,
+        InBlockCountCoding: UniversalCode,
+        InOutdegreeCoding: UniversalCode,
+        InOffsetCoding: UniversalCode,
+        InReferenceCoding: UniversalCode,
+        InIntervalCoding: UniversalCode,
+        InResidualCoding: UniversalCode,
+        OutBlockCoding: Huffman,
+        OutBlockCountCoding: UniversalCode,
+        OutOutdegreeCoding: Huffman,
+        OutOffsetCoding: UniversalCode,
+        OutReferenceCoding: UniversalCode,
+        OutIntervalCoding: Huffman,
+        OutResidualCoding: Huffman,
+        BV: AsRef<
+            BVGraph<
+                InBlockCoding,
+                InBlockCountCoding,
+                InOutdegreeCoding,
+                InOffsetCoding,
+                InReferenceCoding,
+                InIntervalCoding,
+                InResidualCoding,
+                OutBlockCoding,
+                OutBlockCountCoding,
+                OutOutdegreeCoding,
+                OutOffsetCoding,
+                OutReferenceCoding,
+                OutIntervalCoding,
+                OutResidualCoding,
+            >,
+        >,
+    >
+    BVGraphNodeIterator<
         InBlockCoding,
         InBlockCountCoding,
         InOutdegreeCoding,
@@ -361,23 +432,9 @@ impl<
         OutReferenceCoding,
         OutIntervalCoding,
         OutResidualCoding,
->>> BVGraphNodeIterator<
-        InBlockCoding,
-        InBlockCountCoding,
-        InOutdegreeCoding,
-        InOffsetCoding,
-        InReferenceCoding,
-        InIntervalCoding,
-        InResidualCoding,
-        OutBlockCoding,
-        OutBlockCountCoding,
-        OutOutdegreeCoding,
-        OutOffsetCoding,
-        OutReferenceCoding,
-        OutIntervalCoding,
-        OutResidualCoding,
-        BV
-> {
+        BV,
+    >
+{
     #[inline(always)]
     pub fn has_next(&self) -> bool {
         self.curr < self.n as i64 - 1
@@ -397,53 +454,59 @@ impl<
 }
 
 impl<
-    InBlockCoding: UniversalCode,
-    InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
-    InOffsetCoding: UniversalCode,
-    InReferenceCoding: UniversalCode,
-    InIntervalCoding: UniversalCode,
-    InResidualCoding: UniversalCode,
-    OutBlockCoding: Huffman,
-    OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: Huffman,
-    OutOffsetCoding: UniversalCode,
-    OutReferenceCoding: UniversalCode,
-    OutIntervalCoding: Huffman,
-    OutResidualCoding: Huffman,
-> AsMut<BVGraph<
-    InBlockCoding,
-    InBlockCountCoding,
-    InOutdegreeCoding,
-    InOffsetCoding,
-    InReferenceCoding,
-    InIntervalCoding,
-    InResidualCoding,
-    OutBlockCoding,
-    OutBlockCountCoding,
-    OutOutdegreeCoding,
-    OutOffsetCoding,
-    OutReferenceCoding,
-    OutIntervalCoding,
-    OutResidualCoding,
->> for BVGraph<
-    InBlockCoding,
-    InBlockCountCoding,
-    InOutdegreeCoding,
-    InOffsetCoding,
-    InReferenceCoding,
-    InIntervalCoding,
-    InResidualCoding,
-    OutBlockCoding,
-    OutBlockCountCoding,
-    OutOutdegreeCoding,
-    OutOffsetCoding,
-    OutReferenceCoding,
-    OutIntervalCoding,
-    OutResidualCoding,
-> {
-
-    fn as_mut(&mut self) -> &mut BVGraph<
+        InBlockCoding: UniversalCode,
+        InBlockCountCoding: UniversalCode,
+        InOutdegreeCoding: UniversalCode,
+        InOffsetCoding: UniversalCode,
+        InReferenceCoding: UniversalCode,
+        InIntervalCoding: UniversalCode,
+        InResidualCoding: UniversalCode,
+        OutBlockCoding: Huffman,
+        OutBlockCountCoding: UniversalCode,
+        OutOutdegreeCoding: Huffman,
+        OutOffsetCoding: UniversalCode,
+        OutReferenceCoding: UniversalCode,
+        OutIntervalCoding: Huffman,
+        OutResidualCoding: Huffman,
+    >
+    AsMut<
+        BVGraph<
+            InBlockCoding,
+            InBlockCountCoding,
+            InOutdegreeCoding,
+            InOffsetCoding,
+            InReferenceCoding,
+            InIntervalCoding,
+            InResidualCoding,
+            OutBlockCoding,
+            OutBlockCountCoding,
+            OutOutdegreeCoding,
+            OutOffsetCoding,
+            OutReferenceCoding,
+            OutIntervalCoding,
+            OutResidualCoding,
+        >,
+    >
+    for BVGraph<
+        InBlockCoding,
+        InBlockCountCoding,
+        InOutdegreeCoding,
+        InOffsetCoding,
+        InReferenceCoding,
+        InIntervalCoding,
+        InResidualCoding,
+        OutBlockCoding,
+        OutBlockCountCoding,
+        OutOutdegreeCoding,
+        OutOffsetCoding,
+        OutReferenceCoding,
+        OutIntervalCoding,
+        OutResidualCoding,
+    >
+{
+    fn as_mut(
+        &mut self,
+    ) -> &mut BVGraph<
         InBlockCoding,
         InBlockCountCoding,
         InOutdegreeCoding,
@@ -464,103 +527,110 @@ impl<
 }
 
 impl<
-    InBlockCoding: UniversalCode,
-    InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
-    InOffsetCoding: UniversalCode,
-    InReferenceCoding: UniversalCode,
-    InIntervalCoding: UniversalCode,
-    InResidualCoding: UniversalCode,
-    OutBlockCoding: Huffman,
-    OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: Huffman,
-    OutOffsetCoding: UniversalCode,
-    OutReferenceCoding: UniversalCode,
-    OutIntervalCoding: Huffman,
-    OutResidualCoding: Huffman,
-> AsRef<BVGraph<
-    InBlockCoding,
-    InBlockCountCoding,
-    InOutdegreeCoding,
-    InOffsetCoding,
-    InReferenceCoding,
-    InIntervalCoding,
-    InResidualCoding,
-    OutBlockCoding,
-    OutBlockCountCoding,
-    OutOutdegreeCoding,
-    OutOffsetCoding,
-    OutReferenceCoding,
-    OutIntervalCoding,
-    OutResidualCoding,
->> for BVGraph<
-    InBlockCoding,
-    InBlockCountCoding,
-    InOutdegreeCoding,
-    InOffsetCoding,
-    InReferenceCoding,
-    InIntervalCoding,
-    InResidualCoding,
-    OutBlockCoding,
-    OutBlockCountCoding,
-    OutOutdegreeCoding,
-    OutOffsetCoding,
-    OutReferenceCoding,
-    OutIntervalCoding,
-    OutResidualCoding,
->
-{
-    fn as_ref(&self) -> &BVGraph<
-        InBlockCoding, 
-        InBlockCountCoding, 
-        InOutdegreeCoding, 
-        InOffsetCoding, 
+        InBlockCoding: UniversalCode,
+        InBlockCountCoding: UniversalCode,
+        InOutdegreeCoding: UniversalCode,
+        InOffsetCoding: UniversalCode,
+        InReferenceCoding: UniversalCode,
+        InIntervalCoding: UniversalCode,
+        InResidualCoding: UniversalCode,
+        OutBlockCoding: Huffman,
+        OutBlockCountCoding: UniversalCode,
+        OutOutdegreeCoding: Huffman,
+        OutOffsetCoding: UniversalCode,
+        OutReferenceCoding: UniversalCode,
+        OutIntervalCoding: Huffman,
+        OutResidualCoding: Huffman,
+    >
+    AsRef<
+        BVGraph<
+            InBlockCoding,
+            InBlockCountCoding,
+            InOutdegreeCoding,
+            InOffsetCoding,
+            InReferenceCoding,
+            InIntervalCoding,
+            InResidualCoding,
+            OutBlockCoding,
+            OutBlockCountCoding,
+            OutOutdegreeCoding,
+            OutOffsetCoding,
+            OutReferenceCoding,
+            OutIntervalCoding,
+            OutResidualCoding,
+        >,
+    >
+    for BVGraph<
+        InBlockCoding,
+        InBlockCountCoding,
+        InOutdegreeCoding,
+        InOffsetCoding,
         InReferenceCoding,
-        InIntervalCoding, 
-        InResidualCoding, 
-        OutBlockCoding, 
-        OutBlockCountCoding, 
-        OutOutdegreeCoding, 
-        OutOffsetCoding, 
+        InIntervalCoding,
+        InResidualCoding,
+        OutBlockCoding,
+        OutBlockCountCoding,
+        OutOutdegreeCoding,
+        OutOffsetCoding,
         OutReferenceCoding,
-        OutIntervalCoding, 
-        OutResidualCoding
+        OutIntervalCoding,
+        OutResidualCoding,
+    >
+{
+    fn as_ref(
+        &self,
+    ) -> &BVGraph<
+        InBlockCoding,
+        InBlockCountCoding,
+        InOutdegreeCoding,
+        InOffsetCoding,
+        InReferenceCoding,
+        InIntervalCoding,
+        InResidualCoding,
+        OutBlockCoding,
+        OutBlockCountCoding,
+        OutOutdegreeCoding,
+        OutOffsetCoding,
+        OutReferenceCoding,
+        OutIntervalCoding,
+        OutResidualCoding,
     > {
         self
     }
 }
 
 impl<
-    InBlockCoding: UniversalCode,
-    InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
-    InOffsetCoding: UniversalCode,
-    InReferenceCoding: UniversalCode,
-    InIntervalCoding: UniversalCode,
-    InResidualCoding: UniversalCode,
-    OutBlockCoding: Huffman,
-    OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: Huffman,
-    OutOffsetCoding: UniversalCode,
-    OutReferenceCoding: UniversalCode,
-    OutIntervalCoding: Huffman,
-    OutResidualCoding: Huffman,
-> IntoIterator for BVGraph<
-    InBlockCoding,
-    InBlockCountCoding,
-    InOutdegreeCoding,
-    InOffsetCoding,
-    InReferenceCoding,
-    InIntervalCoding,
-    InResidualCoding,
-    OutBlockCoding,
-    OutBlockCountCoding,
-    OutOutdegreeCoding,
-    OutOffsetCoding,
-    OutReferenceCoding,
-    OutIntervalCoding,
-    OutResidualCoding,
-> 
+        InBlockCoding: UniversalCode,
+        InBlockCountCoding: UniversalCode,
+        InOutdegreeCoding: UniversalCode,
+        InOffsetCoding: UniversalCode,
+        InReferenceCoding: UniversalCode,
+        InIntervalCoding: UniversalCode,
+        InResidualCoding: UniversalCode,
+        OutBlockCoding: Huffman,
+        OutBlockCountCoding: UniversalCode,
+        OutOutdegreeCoding: Huffman,
+        OutOffsetCoding: UniversalCode,
+        OutReferenceCoding: UniversalCode,
+        OutIntervalCoding: Huffman,
+        OutResidualCoding: Huffman,
+    > IntoIterator
+    for BVGraph<
+        InBlockCoding,
+        InBlockCountCoding,
+        InOutdegreeCoding,
+        InOffsetCoding,
+        InReferenceCoding,
+        InIntervalCoding,
+        InResidualCoding,
+        OutBlockCoding,
+        OutBlockCountCoding,
+        OutOutdegreeCoding,
+        OutOffsetCoding,
+        OutReferenceCoding,
+        OutIntervalCoding,
+        OutResidualCoding,
+    >
 {
     type Item = usize;
 
@@ -580,21 +650,21 @@ impl<
         OutIntervalCoding,
         OutResidualCoding,
         BVGraph<
-            InBlockCoding, 
-            InBlockCountCoding, 
-            InOutdegreeCoding, 
-            InOffsetCoding, 
+            InBlockCoding,
+            InBlockCountCoding,
+            InOutdegreeCoding,
+            InOffsetCoding,
             InReferenceCoding,
-            InIntervalCoding, 
-            InResidualCoding, 
-            OutBlockCoding, 
-            OutBlockCountCoding, 
-            OutOutdegreeCoding, 
-            OutOffsetCoding, 
+            InIntervalCoding,
+            InResidualCoding,
+            OutBlockCoding,
+            OutBlockCountCoding,
+            OutOutdegreeCoding,
+            OutOffsetCoding,
             OutReferenceCoding,
-            OutIntervalCoding, 
-            OutResidualCoding
-        >
+            OutIntervalCoding,
+            OutResidualCoding,
+        >,
     >;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -626,37 +696,22 @@ impl<
 }
 
 impl<
-    InBlockCoding: UniversalCode,
-    InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
-    InOffsetCoding: UniversalCode,
-    InReferenceCoding: UniversalCode,
-    InIntervalCoding: UniversalCode,
-    InResidualCoding: UniversalCode,
-    OutBlockCoding: Huffman,
-    OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: Huffman,
-    OutOffsetCoding: UniversalCode,
-    OutReferenceCoding: UniversalCode,
-    OutIntervalCoding: Huffman,
-    OutResidualCoding: Huffman,
-> BVGraph<
-    InBlockCoding,
-    InBlockCountCoding,
-    InOutdegreeCoding,
-    InOffsetCoding,
-    InReferenceCoding,
-    InIntervalCoding,
-    InResidualCoding,
-    OutBlockCoding,
-    OutBlockCountCoding,
-    OutOutdegreeCoding,
-    OutOffsetCoding,
-    OutReferenceCoding,
-    OutIntervalCoding,
-    OutResidualCoding,
-> {
-    pub fn iter(&self) -> BVGraphNodeIterator<
+        InBlockCoding: UniversalCode,
+        InBlockCountCoding: UniversalCode,
+        InOutdegreeCoding: UniversalCode,
+        InOffsetCoding: UniversalCode,
+        InReferenceCoding: UniversalCode,
+        InIntervalCoding: UniversalCode,
+        InResidualCoding: UniversalCode,
+        OutBlockCoding: Huffman,
+        OutBlockCountCoding: UniversalCode,
+        OutOutdegreeCoding: Huffman,
+        OutOffsetCoding: UniversalCode,
+        OutReferenceCoding: UniversalCode,
+        OutIntervalCoding: Huffman,
+        OutResidualCoding: Huffman,
+    >
+    BVGraph<
         InBlockCoding,
         InBlockCountCoding,
         InOutdegreeCoding,
@@ -671,7 +726,26 @@ impl<
         OutReferenceCoding,
         OutIntervalCoding,
         OutResidualCoding,
-        &Self
+    >
+{
+    pub fn iter(
+        &self,
+    ) -> BVGraphNodeIterator<
+        InBlockCoding,
+        InBlockCountCoding,
+        InOutdegreeCoding,
+        InOffsetCoding,
+        InReferenceCoding,
+        InIntervalCoding,
+        InResidualCoding,
+        OutBlockCoding,
+        OutBlockCountCoding,
+        OutOutdegreeCoding,
+        OutOffsetCoding,
+        OutReferenceCoding,
+        OutIntervalCoding,
+        OutResidualCoding,
+        &Self,
     > {
         BVGraphNodeIterator {
             n: self.n,
@@ -704,19 +778,31 @@ impl<
         if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
             return self.cached_outdegree.get().unwrap();
         }
-        
-        self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64); // TODO: offsets are encoded
-        let d = InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.in_zeta_k) as usize;
+
+        self.outdegrees_binary_wrapper
+            .borrow_mut()
+            .position(self.offsets[x] as u64); // TODO: offsets are encoded
+        let d = InOutdegreeCoding::read_next(
+            &mut self.outdegrees_binary_wrapper.borrow_mut(),
+            self.in_zeta_k,
+        ) as usize;
 
         self.cached_node.set(Some(x));
         self.cached_outdegree.set(Some(d));
-        self.cached_ptr.set(Some(self.outdegrees_binary_wrapper.borrow().get_position()));
+        self.cached_ptr
+            .set(Some(self.outdegrees_binary_wrapper.borrow().get_position()));
 
         d
     }
-    
+
     #[inline(always)]
-    fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Vec<usize> {
+    fn decode_list(
+        &self,
+        x: usize,
+        decoder: &mut BinaryReader,
+        window: Option<&mut Vec<Vec<usize>>>,
+        outd: &mut [usize],
+    ) -> Vec<usize> {
         let cyclic_buffer_size = self.in_window_size + 1;
         let degree;
         if window.is_none() {
@@ -724,7 +810,7 @@ impl<
             decoder.position(self.cached_ptr.get().unwrap() as u64);
         } else {
             degree = InOutdegreeCoding::read_next(decoder, self.in_zeta_k) as usize;
-            outd[x % cyclic_buffer_size] = degree; 
+            outd[x % cyclic_buffer_size] = degree;
         }
 
         if degree == 0 {
@@ -737,7 +823,8 @@ impl<
         }
 
         // Position in the circular buffer of the reference of the current node
-        let reference_index = ((x as i64 - reference + cyclic_buffer_size as i64) as usize) % cyclic_buffer_size;
+        let reference_index =
+            ((x as i64 - reference + cyclic_buffer_size as i64) as usize) % cyclic_buffer_size;
 
         let mut block = Vec::default();
 
@@ -754,9 +841,13 @@ impl<
 
             let mut i = 0;
             while i < block_count {
-                block.push(InBlockCoding::read_next(decoder, self.in_zeta_k) as usize + if i == 0 {0} else {1});
+                block.push(
+                    InBlockCoding::read_next(decoder, self.in_zeta_k) as usize
+                        + if i == 0 { 0 } else { 1 },
+                );
                 total += block[i];
-                if (i & 1) == 0 { // Alternate, count only even blocks
+                if (i & 1) == 0 {
+                    // Alternate, count only even blocks
                     copied += block[i];
                 }
 
@@ -765,12 +856,13 @@ impl<
 
             // If the block count is even, we must compute the number of successors copied implicitly
             if (block_count & 1) == 0 {
-                copied += (
-                    if window.is_some() {outd[reference_index]} 
-                    else {self.outdegree_internal((x as i64 - reference) as usize)}
-                ) - total;
+                copied += (if window.is_some() {
+                    outd[reference_index]
+                } else {
+                    self.outdegree_internal((x as i64 - reference) as usize)
+                }) - total;
             }
-            
+
             extra_count = degree - copied;
         } else {
             extra_count = degree;
@@ -783,22 +875,28 @@ impl<
 
         if extra_count > 0 && self.in_min_interval_len != 0 {
             interval_count = GammaCode::read_next(decoder, self.in_zeta_k) as usize;
-            
+
             if interval_count != 0 {
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
-                
+
                 left.push(nat2int(InIntervalCoding::read_next(decoder, self.in_zeta_k)) + x as i64);
-                len.push(InIntervalCoding::read_next(decoder, self.in_zeta_k) as usize + self.in_min_interval_len);
-                let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
+                len.push(
+                    InIntervalCoding::read_next(decoder, self.in_zeta_k) as usize
+                        + self.in_min_interval_len,
+                );
+                let mut prev = left[0] + len[0] as i64; // Holds the last integer in the last interval
                 extra_count -= len[0];
 
                 let mut i = 1;
                 while i < interval_count {
                     prev += InIntervalCoding::read_next(decoder, self.in_zeta_k) as i64 + 1;
-                    
+
                     left.push(prev);
-                    len.push(InIntervalCoding::read_next(decoder, self.in_zeta_k) as usize + self.in_min_interval_len);
+                    len.push(
+                        InIntervalCoding::read_next(decoder, self.in_zeta_k) as usize
+                            + self.in_min_interval_len,
+                    );
 
                     prev += len[i] as i64;
                     extra_count -= len[i];
@@ -810,12 +908,17 @@ impl<
 
         let mut residual_list = Vec::with_capacity(extra_count);
         if extra_count > 0 {
-            residual_list.push(x as i64 + nat2int(InResidualCoding::read_next(decoder, self.in_zeta_k)));
+            residual_list
+                .push(x as i64 + nat2int(InResidualCoding::read_next(decoder, self.in_zeta_k)));
             let mut remaining = extra_count - 1;
             let mut curr_len = 1;
 
             while remaining > 0 {
-                residual_list.push(residual_list[curr_len - 1] + InResidualCoding::read_next(decoder, self.in_zeta_k) as i64 + 1);
+                residual_list.push(
+                    residual_list[curr_len - 1]
+                        + InResidualCoding::read_next(decoder, self.in_zeta_k) as i64
+                        + 1,
+                );
                 curr_len += 1;
 
                 remaining -= 1;
@@ -828,7 +931,7 @@ impl<
             let total_lenght = len.iter().sum();
 
             extra_list = Vec::with_capacity(total_lenght);
-            let mut curr_left = if !left.is_empty() {left[0]} else {0};
+            let mut curr_left = if !left.is_empty() { left[0] } else { 0 };
             let mut curr_index = 0;
             let mut curr_interval = 0;
             let mut remaining = left.len();
@@ -845,8 +948,8 @@ impl<
                     }
                     curr_index = 0;
                 }
-            }           
-        
+            }
+
             if extra_count > 0 {
                 let len_residual = residual_list.len();
                 let len_extra = extra_list.len();
@@ -861,7 +964,6 @@ impl<
                     } else {
                         temp_list.push(extra_list[idx1]);
                         idx1 += 1;
-                        
                     }
                 }
 
@@ -885,19 +987,14 @@ impl<
         if reference > 0 {
             let decoded_reference;
 
-            let mut reference_it = 
-                if let Some(window) = window {
-                    window[reference_index][0..outd[reference_index]].iter()
-                } else {
-                    decoded_reference = self.decode_list(
-                        (x as i64 - reference) as usize, 
-                        decoder,
-                        None, 
-                        &mut []
-                    );
-                    decoded_reference.iter()
-                };
-            
+            let mut reference_it = if let Some(window) = window {
+                window[reference_index][0..outd[reference_index]].iter()
+            } else {
+                decoded_reference =
+                    self.decode_list((x as i64 - reference) as usize, decoder, None, &mut []);
+                decoded_reference.iter()
+            };
+
             let mask_len = block.len();
             let mut curr_mask = 0;
             let mut left;
@@ -909,7 +1006,12 @@ impl<
                     reference_it.nth(block[curr_mask] - 1);
                     curr_mask += 1;
 
-                    left = if curr_mask < mask_len {curr_mask += 1; block[curr_mask - 1] as i64} else {-1};
+                    left = if curr_mask < mask_len {
+                        curr_mask += 1;
+                        block[curr_mask - 1] as i64
+                    } else {
+                        -1
+                    };
                 }
             } else {
                 left = -1;
@@ -927,17 +1029,22 @@ impl<
                 if left == -1 {
                     block_list.push(*next.unwrap());
                 }
-                
+
                 if left > 0 {
                     left -= 1;
                     if left == 0 && curr_mask < mask_len {
                         reference_it.nth(block[curr_mask] - 1);
                         curr_mask += 1;
 
-                        left = if curr_mask < mask_len {curr_mask += 1; block[curr_mask - 1] as i64} else {-1};
+                        left = if curr_mask < mask_len {
+                            curr_mask += 1;
+                            block[curr_mask - 1] as i64
+                        } else {
+                            -1
+                        };
                     }
                     block_list.push(*next.unwrap());
-                }                
+                }
             }
         }
 
@@ -990,7 +1097,14 @@ impl<
     }
 
     #[inline(always)]
-    fn process_residuals(&self, residuals: &[usize], i: usize, adj_block: &[usize], cost: &mut f64, sym_cost: &mut [f64]) {
+    fn process_residuals(
+        &self,
+        residuals: &[usize],
+        i: usize,
+        adj_block: &[usize],
+        cost: &mut f64,
+        sym_cost: &mut [f64],
+    ) {
         let mut r = i;
         let mut last_delta = 0;
         let mut adj_pos = 0;
@@ -1000,16 +1114,16 @@ impl<
         for (j, res) in residuals.iter().enumerate() {
             let mut ctx = 0;
             if j == 0 {
-                ctx = FIRST_RESIDUAL_BASE_CTX + 
-                    zuck_encode(residuals.len(), K_ZUCK, I_ZUCK, J_ZUCK)
-                    .0
-                    .min(NUM_FIRST_RESIDUAL_CTX - 1);
+                ctx = FIRST_RESIDUAL_BASE_CTX
+                    + zuck_encode(residuals.len(), K_ZUCK, I_ZUCK, J_ZUCK)
+                        .0
+                        .min(NUM_FIRST_RESIDUAL_CTX - 1);
                 last_delta = int2nat(*res as i64 - r as i64) as usize;
             } else {
-                ctx = RESIDUALS_BASE_CTX +
-                    zuck_encode(last_delta, K_ZUCK, I_ZUCK, J_ZUCK)
-                    .0
-                    .min(NUM_RESIDUAL_CTX - 1);
+                ctx = RESIDUALS_BASE_CTX
+                    + zuck_encode(last_delta, K_ZUCK, I_ZUCK, J_ZUCK)
+                        .0
+                        .min(NUM_RESIDUAL_CTX - 1);
                 last_delta = res - r;
                 while adj_pos < adj_lim && adj_block[adj_pos] < r {
                     adj_pos += 1;
@@ -1025,7 +1139,12 @@ impl<
                     for _ in self.out_min_interval_len..zero_run {
                         self.remove_cost(cost, sym_cost);
                     }
-                    self.add_cost(RLE_CTX, zero_run - self.out_min_interval_len, cost, sym_cost);
+                    self.add_cost(
+                        RLE_CTX,
+                        zero_run - self.out_min_interval_len,
+                        cost,
+                        sym_cost,
+                    );
                 }
                 zero_run = 0;
             }
@@ -1039,15 +1158,26 @@ impl<
             for _ in self.out_min_interval_len..zero_run {
                 self.remove_cost(cost, sym_cost);
             }
-            self.add_cost(RLE_CTX, zero_run - self.out_min_interval_len, cost, sym_cost);
+            self.add_cost(
+                RLE_CTX,
+                zero_run - self.out_min_interval_len,
+                cost,
+                sym_cost,
+            );
         }
     }
 
     #[inline(always)]
-    fn compute_blocks_and_residuals(&self, curr_list: &[usize], ref_list: &[usize], blocks: &mut Vec<usize>, residuals: &mut Vec<usize>) {
+    fn compute_blocks_and_residuals(
+        &self,
+        curr_list: &[usize],
+        ref_list: &[usize],
+        blocks: &mut Vec<usize>,
+        residuals: &mut Vec<usize>,
+    ) {
         blocks.clear();
         residuals.clear();
-        
+
         let mut ipos = 0;
         let mut rpos = 0;
         let mut is_same = true;
@@ -1100,7 +1230,14 @@ impl<
     }
 
     #[inline(always)]
-    fn process_blocks(&self, blocks: &[usize], ref_list: &[usize], adj_block: &mut Vec<usize>, cost: &mut f64, sym_cost: &[f64]) {
+    fn process_blocks(
+        &self,
+        blocks: &[usize],
+        ref_list: &[usize],
+        adj_block: &mut Vec<usize>,
+        cost: &mut f64,
+        sym_cost: &[f64],
+    ) {
         self.add_cost(BLOCK_COUNT_CTX, blocks.len(), cost, sym_cost);
         let mut copy = true;
         let mut pos = 0;
@@ -1111,7 +1248,13 @@ impl<
                 b -= 1;
             }
 
-            let ctx = if j == 0 {BLOCK_CTX} else if j % 2 == 0 {BLOCK_CTX_EVEN} else {BLOCK_CTX_ODD};
+            let ctx = if j == 0 {
+                BLOCK_CTX
+            } else if j % 2 == 0 {
+                BLOCK_CTX_EVEN
+            } else {
+                BLOCK_CTX_ODD
+            };
             self.add_cost(ctx, b, cost, sym_cost);
 
             if copy {
@@ -1135,9 +1278,13 @@ impl<
     }
 
     #[inline(always)]
-    pub(crate) fn compress(&mut self, graph_obs: &mut BinaryWriter, offsets_obs: &mut BinaryWriter) {
+    pub(crate) fn compress(
+        &mut self,
+        graph_obs: &mut BinaryWriter,
+        offsets_obs: &mut BinaryWriter,
+    ) {
         let mut bit_offset: usize = 0;
-        
+
         let cyclic_buffer_size = self.out_window_size + 1;
         // Cyclic array of previous lists
         let mut list = vec![vec![0; 1024]; cyclic_buffer_size];
@@ -1167,40 +1314,67 @@ impl<
             let outd = node_iter.outdegree();
             let curr_idx = curr_node % cyclic_buffer_size;
 
-            let ctx =  
-                if curr_node == 0 || curr_node % 32 == 0 {
-                    FIRST_DEGREE_CTX
-                } else { 
-                    DEGREE_BASE_CTX + zuck_encode(curr_node % 32, K_ZUCK, I_ZUCK, J_ZUCK).0.min(NUM_DEGREE_CTX - 1) 
-                };
+            let ctx = if curr_node == 0 || curr_node % 32 == 0 {
+                FIRST_DEGREE_CTX
+            } else {
+                DEGREE_BASE_CTX
+                    + zuck_encode(curr_node % 32, K_ZUCK, I_ZUCK, J_ZUCK)
+                        .0
+                        .min(NUM_DEGREE_CTX - 1)
+            };
             values[ctx].push(outd);
 
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
             }
-            
+
             list[curr_idx] = Vec::from(&node_iter.successor_array()[..outd]);
             list_len[curr_idx] = outd;
-            
+
             if outd > 0 {
                 let mut cand;
-                
+
                 ref_count[curr_idx] = -1;
 
                 let mut c = 0_f64;
-                self.process_residuals(list[curr_idx].as_slice(), curr_node, &adj_block, &mut c, sym_cost.as_mut_slice());
+                self.process_residuals(
+                    list[curr_idx].as_slice(),
+                    curr_node,
+                    &adj_block,
+                    &mut c,
+                    sym_cost.as_mut_slice(),
+                );
                 let mut cost = c;
                 let base_cost = c;
                 saved_costs[curr_node] = 0.0;
 
                 for r in 1..cyclic_buffer_size {
                     cand = ((curr_node + cyclic_buffer_size - r) % cyclic_buffer_size) as i32;
-                    if ref_count[cand as usize] < (self.out_max_ref_count as i32) && list_len[cand as usize] != 0 {
+                    if ref_count[cand as usize] < (self.out_max_ref_count as i32)
+                        && list_len[cand as usize] != 0
+                    {
                         adj_block.clear();
                         c = 0.0;
-                        self.compute_blocks_and_residuals(&list[curr_idx], &list[cand as usize], &mut blocks, &mut residuals);
-                        self.process_blocks(&blocks, &list[cand as usize], &mut adj_block, &mut c, sym_cost.as_mut_slice());
-                        self.process_residuals(&residuals, curr_node, &adj_block, &mut c, sym_cost.as_mut_slice());
+                        self.compute_blocks_and_residuals(
+                            &list[curr_idx],
+                            &list[cand as usize],
+                            &mut blocks,
+                            &mut residuals,
+                        );
+                        self.process_blocks(
+                            &blocks,
+                            &list[cand as usize],
+                            &mut adj_block,
+                            &mut c,
+                            sym_cost.as_mut_slice(),
+                        );
+                        self.process_residuals(
+                            &residuals,
+                            curr_node,
+                            &adj_block,
+                            &mut c,
+                            sym_cost.as_mut_slice(),
+                        );
 
                         if c + 1e-6 < cost {
                             best_candidates[curr_node] = (cand as usize, r);
@@ -1209,13 +1383,13 @@ impl<
                         }
                     }
                 }
-                
+
                 ref_count[curr_idx] = ref_count[best_candidates[curr_node].0] + 1;
 
-                self.add_vals( 
-                    curr_node, 
-                    best_candidates[curr_node].1 as usize, 
-                    list[best_candidates[curr_node].0].as_slice(), 
+                self.add_vals(
+                    curr_node,
+                    best_candidates[curr_node].1 as usize,
+                    list[best_candidates[curr_node].0].as_slice(),
                     list[curr_idx].as_slice(),
                     &mut values,
                 );
@@ -1237,69 +1411,138 @@ impl<
         huff.init(&values, graph_obs);
 
         println!("Headers took {} bits", graph_obs.written_bits);
-        
+
         // Now, compress each node
-        node_iter = self.iter();        
+        node_iter = self.iter();
         while node_iter.has_next() {
             let curr_node = node_iter.next().unwrap();
             let outd = node_iter.outdegree();
             let curr_idx = curr_node % cyclic_buffer_size;
-            
+
             // println!("Curr node: {}, outdegree: {}", curr_node, outd);
-            
+
             // We write the final offset to the offsets stream
-            self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
-            
+            self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset)
+                .unwrap();
+
             bit_offset = graph_obs.written_bits;
-            
-            let ctx = 
-                if curr_node == 0 || curr_node % 32 == 0 {
-                    FIRST_DEGREE_CTX
-                } else { 
-                    DEGREE_BASE_CTX + zuck_encode(curr_node % 32, K_ZUCK, I_ZUCK, J_ZUCK).0.min(NUM_DEGREE_CTX - 1) 
-                };
+
+            let ctx = if curr_node == 0 || curr_node % 32 == 0 {
+                FIRST_DEGREE_CTX
+            } else {
+                DEGREE_BASE_CTX
+                    + zuck_encode(curr_node % 32, K_ZUCK, I_ZUCK, J_ZUCK)
+                        .0
+                        .min(NUM_DEGREE_CTX - 1)
+            };
             // Encode through Huffman
             huff.write_next(outd, graph_obs, ctx);
 
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
             }
-            
+
             list[curr_idx] = Vec::from(&node_iter.successor_array()[..outd]);
             list_len[curr_idx] = outd;
-            
+
             if outd > 0 {
                 let (best_cand, best_ref) = best_candidates[curr_node];
-                
+
                 ref_count[curr_idx] = ref_count[best_cand] + 1;
                 self.diff_comp(
-                    graph_obs, 
-                    curr_node, 
+                    graph_obs,
+                    curr_node,
                     best_ref,
-                    list[best_cand].as_slice(), 
+                    list[best_cand].as_slice(),
                     list[curr_idx].as_slice(),
-                    &huff,
+                    &mut huff,
                 );
             }
         }
 
-        self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
+        // report bits breakdown
+        {
+            let degree_bits = (FIRST_DEGREE_CTX..REFERENCE_BASE_CTX)
+                .map(|ctx| huff.bits_per_context[ctx])
+                .sum::<u64>() as f64;
+            let reference_bits = (REFERENCE_BASE_CTX..REFERENCE_BASE_CTX + NUM_REFERENCE_CTX)
+                .map(|ctx| huff.bits_per_context[ctx])
+                .sum::<u64>() as f64;
+            let block_bits = (BLOCK_COUNT_CTX..FIRST_RESIDUAL_BASE_CTX)
+                .map(|ctx| huff.bits_per_context[ctx])
+                .sum::<u64>() as f64;
+            let first_residual_bits = (FIRST_RESIDUAL_BASE_CTX
+                ..FIRST_RESIDUAL_BASE_CTX + NUM_FIRST_RESIDUAL_CTX)
+                .map(|ctx| huff.bits_per_context[ctx])
+                .sum::<u64>() as f64;
+            let residual_bits = (RESIDUALS_BASE_CTX..RESIDUALS_BASE_CTX + NUM_RESIDUAL_CTX)
+                .map(|ctx| huff.bits_per_context[ctx])
+                .sum::<u64>() as f64;
+            let rle_bits = huff.bits_per_context[RLE_CTX] as f64;
+
+            let edges = self.num_arcs() as f64;
+            let total_huffman_bits = huff.bits_per_context.iter().sum::<u64>() as f64;
+            let total_bits = graph_obs.written_bits as f64;
+            println!(
+                "Degree bits:         {:.2} [{:.2} bits/edge]",
+                degree_bits,
+                degree_bits / edges
+            );
+            println!(
+                "Reference bits:      {:.2} [{:.2} bits/edge]",
+                reference_bits,
+                reference_bits / edges
+            );
+            println!(
+                "Block bits:          {:.2} [{:.2} bits/edge]",
+                block_bits,
+                block_bits / edges
+            );
+            println!(
+                "First residual bits: {:.2} [{:.2} bits/edge]",
+                first_residual_bits,
+                first_residual_bits / edges
+            );
+            println!(
+                "Residual bits:       {:.2} [{:.2} bits/edge]",
+                residual_bits,
+                residual_bits / edges
+            );
+            println!(
+                "RLE bits:            {:.2} [{:.2} bits/edge]",
+                rle_bits,
+                rle_bits / edges
+            );
+            println!(
+                "Total bits:          {:.2} [{:.2} bits/edge]",
+                total_bits,
+                total_bits / edges
+            );
+            println!(
+                "Total bits recorded by huffman:          {:.2} [{:.2} bits/edge]",
+                total_huffman_bits,
+                total_huffman_bits / edges
+            );
+        }
+
+        self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset)
+            .unwrap();
     }
-    
+
     #[inline(always)]
     fn diff_comp(
         &self,
         graph_obs: &mut BinaryWriter,
-        curr_node: usize,  
+        curr_node: usize,
         reference: usize,
         ref_list: &[usize],
         curr_list: &[usize],
-        huff: &HuffmanEncoder,
+        huff: &mut HuffmanEncoder,
     ) {
         let mut blocks = Vec::new();
         let mut residuals = Vec::new();
         let mut adj_block = Vec::new();
-        
+
         self.write_reference(graph_obs, reference);
 
         if reference != 0 {
@@ -1317,7 +1560,13 @@ impl<
                     b -= 1;
                 }
 
-                let ctx = if j == 0 {BLOCK_CTX} else if j % 2 == 0 {BLOCK_CTX_EVEN} else {BLOCK_CTX_ODD};
+                let ctx = if j == 0 {
+                    BLOCK_CTX
+                } else if j % 2 == 0 {
+                    BLOCK_CTX_EVEN
+                } else {
+                    BLOCK_CTX_ODD
+                };
                 huff.write_next(b, graph_obs, ctx);
 
                 if copy {
@@ -1337,7 +1586,7 @@ impl<
                     adj_block.push(ref_list[pos]);
                     pos += 1;
                 }
-            }            
+            }
         } else {
             residuals = Vec::from(curr_list);
         }
@@ -1355,16 +1604,16 @@ impl<
         for (j, res) in residuals.iter().enumerate() {
             let ctx;
             if j == 0 {
-                ctx = FIRST_RESIDUAL_BASE_CTX + 
-                    zuck_encode(residuals.len(), K_ZUCK, I_ZUCK, J_ZUCK)
-                    .0
-                    .min(NUM_FIRST_RESIDUAL_CTX - 1);
+                ctx = FIRST_RESIDUAL_BASE_CTX
+                    + zuck_encode(residuals.len(), K_ZUCK, I_ZUCK, J_ZUCK)
+                        .0
+                        .min(NUM_FIRST_RESIDUAL_CTX - 1);
                 last_delta = int2nat(*res as i64 - r as i64) as usize;
             } else {
-                ctx = RESIDUALS_BASE_CTX +
-                    zuck_encode(last_delta, K_ZUCK, I_ZUCK, J_ZUCK)
-                    .0
-                    .min(NUM_RESIDUAL_CTX - 1);
+                ctx = RESIDUALS_BASE_CTX
+                    + zuck_encode(last_delta, K_ZUCK, I_ZUCK, J_ZUCK)
+                        .0
+                        .min(NUM_RESIDUAL_CTX - 1);
                 last_delta = *res - r;
                 while adj_pos < adj_lim && adj_block[adj_pos] < r {
                     adj_pos += 1;
@@ -1408,11 +1657,10 @@ impl<
         }
     }
 
-
     #[inline(always)]
     fn add_vals(
         &self,
-        curr_node: usize,  
+        curr_node: usize,
         reference: usize,
         ref_list: &[usize],
         curr_list: &[usize],
@@ -1437,7 +1685,13 @@ impl<
                     b -= 1;
                 }
 
-                let ctx = if j == 0 {BLOCK_CTX} else if j % 2 == 0 {BLOCK_CTX_EVEN} else {BLOCK_CTX_ODD};
+                let ctx = if j == 0 {
+                    BLOCK_CTX
+                } else if j % 2 == 0 {
+                    BLOCK_CTX_EVEN
+                } else {
+                    BLOCK_CTX_ODD
+                };
                 vals[ctx].push(b);
 
                 if copy {
@@ -1475,16 +1729,16 @@ impl<
         for (j, res) in residuals.iter().enumerate() {
             let ctx;
             if j == 0 {
-                ctx = FIRST_RESIDUAL_BASE_CTX + 
-                    zuck_encode(residuals.len(), K_ZUCK, I_ZUCK, J_ZUCK)
-                    .0
-                    .min(NUM_FIRST_RESIDUAL_CTX - 1);
+                ctx = FIRST_RESIDUAL_BASE_CTX
+                    + zuck_encode(residuals.len(), K_ZUCK, I_ZUCK, J_ZUCK)
+                        .0
+                        .min(NUM_FIRST_RESIDUAL_CTX - 1);
                 last_delta = int2nat(*res as i64 - r as i64) as usize;
             } else {
-                ctx = RESIDUALS_BASE_CTX +
-                    zuck_encode(last_delta, K_ZUCK, I_ZUCK, J_ZUCK)
-                    .0
-                    .min(NUM_RESIDUAL_CTX - 1);
+                ctx = RESIDUALS_BASE_CTX
+                    + zuck_encode(last_delta, K_ZUCK, I_ZUCK, J_ZUCK)
+                        .0
+                        .min(NUM_RESIDUAL_CTX - 1);
                 last_delta = res - r;
                 while adj_pos < adj_lim && adj_block[adj_pos] < r {
                     adj_pos += 1;
@@ -1529,7 +1783,11 @@ impl<
     }
 
     #[inline(always)]
-    fn write_reference(&self, graph_obs: &mut BinaryWriter, reference: usize) -> Result<usize, String> {
+    fn write_reference(
+        &self,
+        graph_obs: &mut BinaryWriter,
+        reference: usize,
+    ) -> Result<usize, String> {
         if reference > self.out_window_size {
             return Err("The required reference is incompatible with the window size".to_string());
         }
@@ -1539,7 +1797,11 @@ impl<
     }
 
     #[inline(always)]
-    fn write_block_count(&self, graph_obs: &mut BinaryWriter, block_count: usize) -> Result<usize, String> {
+    fn write_block_count(
+        &self,
+        graph_obs: &mut BinaryWriter,
+        block_count: usize,
+    ) -> Result<usize, String> {
         OutBlockCountCoding::write_next(graph_obs, block_count as u64, self.out_zeta_k);
         Ok(block_count)
     }
@@ -1601,49 +1863,51 @@ pub struct BVGraphBuilder<
 }
 
 impl<
-    InBlockCoding: UniversalCode,
-    InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
-    InOffsetCoding: UniversalCode,
-    InReferenceCoding: UniversalCode,
-    InIntervalCoding: UniversalCode,
-    InResidualCoding: UniversalCode,
-    OutBlockCoding: Huffman,
-    OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: Huffman,
-    OutOffsetCoding: UniversalCode,
-    OutReferenceCoding: UniversalCode,
-    OutIntervalCoding: Huffman,
-    OutResidualCoding: Huffman,
-> Default for BVGraphBuilder<
-    InBlockCoding,
-    InBlockCountCoding,
-    InOutdegreeCoding,
-    InOffsetCoding,
-    InReferenceCoding,
-    InIntervalCoding,
-    InResidualCoding,
-    OutBlockCoding,
-    OutBlockCountCoding,
-    OutOutdegreeCoding,
-    OutOffsetCoding,
-    OutReferenceCoding,
-    OutIntervalCoding,
-    OutResidualCoding,
-> {
+        InBlockCoding: UniversalCode,
+        InBlockCountCoding: UniversalCode,
+        InOutdegreeCoding: UniversalCode,
+        InOffsetCoding: UniversalCode,
+        InReferenceCoding: UniversalCode,
+        InIntervalCoding: UniversalCode,
+        InResidualCoding: UniversalCode,
+        OutBlockCoding: Huffman,
+        OutBlockCountCoding: UniversalCode,
+        OutOutdegreeCoding: Huffman,
+        OutOffsetCoding: UniversalCode,
+        OutReferenceCoding: UniversalCode,
+        OutIntervalCoding: Huffman,
+        OutResidualCoding: Huffman,
+    > Default
+    for BVGraphBuilder<
+        InBlockCoding,
+        InBlockCountCoding,
+        InOutdegreeCoding,
+        InOffsetCoding,
+        InReferenceCoding,
+        InIntervalCoding,
+        InResidualCoding,
+        OutBlockCoding,
+        OutBlockCountCoding,
+        OutOutdegreeCoding,
+        OutOffsetCoding,
+        OutReferenceCoding,
+        OutIntervalCoding,
+        OutResidualCoding,
+    >
+{
     fn default() -> Self {
-        Self { 
-            num_nodes: 0, 
-            num_edges: 0, 
-            loaded_graph: Rc::new([]), 
-            loaded_offsets: Box::default(), 
+        Self {
+            num_nodes: 0,
+            num_edges: 0,
+            loaded_graph: Rc::new([]),
+            loaded_offsets: Box::default(),
             graph_binary_wrapper: BinaryReader::default(),
             outdegrees_binary_wrapper: BinaryReader::default(),
-            cached_node: None, 
-            cached_outdegree: None, 
-            cached_ptr: None, 
-            in_max_ref_count: 0, 
-            in_window_size: 0, 
+            cached_node: None,
+            cached_outdegree: None,
+            cached_ptr: None,
+            in_max_ref_count: 0,
+            in_window_size: 0,
             in_min_interval_len: 0,
             out_max_ref_count: 3,
             out_window_size: 7,
@@ -1669,51 +1933,65 @@ impl<
 }
 
 impl<
-    InBlockCoding: UniversalCode,
-    InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
-    InOffsetCoding: UniversalCode,
-    InReferenceCoding: UniversalCode,
-    InIntervalCoding: UniversalCode,
-    InResidualCoding: UniversalCode,
-    OutBlockCoding: Huffman,
-    OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: Huffman,
-    OutOffsetCoding: UniversalCode,
-    OutReferenceCoding: UniversalCode,
-    OutIntervalCoding: Huffman,
-    OutResidualCoding: Huffman,
-> BVGraphBuilder<
-    InBlockCoding,
-    InBlockCountCoding,
-    InOutdegreeCoding,
-    InOffsetCoding,
-    InReferenceCoding,
-    InIntervalCoding,
-    InResidualCoding,
-    OutBlockCoding,
-    OutBlockCountCoding,
-    OutOutdegreeCoding,
-    OutOffsetCoding,
-    OutReferenceCoding,
-    OutIntervalCoding,
-    OutResidualCoding,
-> {
+        InBlockCoding: UniversalCode,
+        InBlockCountCoding: UniversalCode,
+        InOutdegreeCoding: UniversalCode,
+        InOffsetCoding: UniversalCode,
+        InReferenceCoding: UniversalCode,
+        InIntervalCoding: UniversalCode,
+        InResidualCoding: UniversalCode,
+        OutBlockCoding: Huffman,
+        OutBlockCountCoding: UniversalCode,
+        OutOutdegreeCoding: Huffman,
+        OutOffsetCoding: UniversalCode,
+        OutReferenceCoding: UniversalCode,
+        OutIntervalCoding: Huffman,
+        OutResidualCoding: Huffman,
+    >
+    BVGraphBuilder<
+        InBlockCoding,
+        InBlockCountCoding,
+        InOutdegreeCoding,
+        InOffsetCoding,
+        InReferenceCoding,
+        InIntervalCoding,
+        InResidualCoding,
+        OutBlockCoding,
+        OutBlockCountCoding,
+        OutOutdegreeCoding,
+        OutOffsetCoding,
+        OutReferenceCoding,
+        OutIntervalCoding,
+        OutResidualCoding,
+    >
+{
     pub fn new() -> BVGraphBuilder<
-        InBlockCoding, InBlockCountCoding, InOutdegreeCoding, InOffsetCoding, InReferenceCoding, InIntervalCoding, InResidualCoding, 
-        OutBlockCoding, OutBlockCountCoding, OutOutdegreeCoding, OutOffsetCoding, OutReferenceCoding, OutIntervalCoding, OutResidualCoding
+        InBlockCoding,
+        InBlockCountCoding,
+        InOutdegreeCoding,
+        InOffsetCoding,
+        InReferenceCoding,
+        InIntervalCoding,
+        InResidualCoding,
+        OutBlockCoding,
+        OutBlockCountCoding,
+        OutOutdegreeCoding,
+        OutOffsetCoding,
+        OutReferenceCoding,
+        OutIntervalCoding,
+        OutResidualCoding,
     > {
         Self::default()
     }
 
     /// Loads a previously-compressed BVGraph.
-    /// 
+    ///
     /// This method can be called either before or after [`Self::load_offsets()`].
     ///  
     /// # Arguments
-    /// 
+    ///
     /// * `basename` - The base name of the compressed graph file
-    /// 
+    ///
     /// # Examples
     /// ```
     /// let file_base_name = "graph1";
@@ -1736,13 +2014,13 @@ impl<
     }
 
     /// Loads a previously-compressed BVGraph's offsets file.
-    /// 
+    ///
     /// This method can be called either before or after [`Self::load_graph()`], but <strong>always</strong> after loading the offsets.
     ///  
     /// # Arguments
-    /// 
+    ///
     /// * `basename` - The base name of the compressed graph file
-    /// 
+    ///
     /// # Examples
     /// ```
     /// let file_base_name = "graph1";
@@ -1762,7 +2040,7 @@ impl<
         let mut curr = 0;
 
         let mut offsets_ibs = BinaryReader::new(offsets.into());
-        
+
         let mut n = self.num_nodes;
 
         let mut increasing_offsets = Vec::with_capacity(n);
@@ -1780,20 +2058,20 @@ impl<
     }
 
     /// Creates a new binary wrapper around the previously-loaded graph.
-    /// 
+    ///
     /// This wrapper will be used only for operations concerning the outdegree of nodes.
-    /// 
+    ///
     /// This has to be called only after [`Self::load_graph()`].
     pub fn load_outdegrees(mut self) -> Self {
         self.outdegrees_binary_wrapper = BinaryReader::new(self.loaded_graph.clone());
 
-        self 
+        self
     }
 
     /// Sets the maximum reference chain length for reading.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `ref_count` - The maximum length of the chain.
     pub fn set_in_max_ref_count(mut self, ref_count: usize) -> Self {
         self.in_max_ref_count = ref_count;
@@ -1802,9 +2080,9 @@ impl<
     }
 
     /// Sets the maximum reference window size for reading.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `window_size` - The maximum length of the window.
     pub fn set_in_window_size(mut self, window_size: usize) -> Self {
         self.in_window_size = window_size;
@@ -1813,9 +2091,9 @@ impl<
     }
 
     /// Sets the minimum length of the intervals for reading.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `min_interval_length` - The minimum length of the intervals.
     pub fn set_in_min_interval_len(mut self, min_interval_len: usize) -> Self {
         self.in_min_interval_len = min_interval_len;
@@ -1824,9 +2102,9 @@ impl<
     }
 
     // Sets the `k` parameter for reading *zeta*-codes, if present.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `zk` - An option containing the value of *k*. If it is not `None` its value has to be >= 1.
     pub fn set_in_zeta(mut self, zk: Option<u64>) -> Self {
         self.in_zeta_k = zk;
@@ -1835,9 +2113,9 @@ impl<
     }
 
     /// Sets the maximum reference chain length for writing.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `ref_count` - The maximum length of the chain.
     pub fn set_out_max_ref_count(mut self, ref_count: usize) -> Self {
         self.out_max_ref_count = ref_count;
@@ -1846,9 +2124,9 @@ impl<
     }
 
     /// Sets the maximum reference window size for writing.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `window_size` - The maximum length of the window.
     pub fn set_out_window_size(mut self, window_size: usize) -> Self {
         self.out_window_size = window_size;
@@ -1857,9 +2135,9 @@ impl<
     }
 
     /// Sets the minimum length of the intervals for writing.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `min_interval_length` - The minimum length of the intervals.
     pub fn set_out_min_interval_len(mut self, min_interval_len: usize) -> Self {
         self.out_min_interval_len = min_interval_len;
@@ -1868,9 +2146,9 @@ impl<
     }
 
     // Sets the `k` parameter for writing *zeta*-codes, if present.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `zk` - An option containing the value of *k*. If it is not `None` its value has to be >= 1.
     pub fn set_out_zeta(mut self, zk: Option<u64>) -> Self {
         self.out_zeta_k = zk;
@@ -1879,9 +2157,9 @@ impl<
     }
 
     /// Sets the number of nodes of the graph.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `nodes` - The amount of nodes to set.
     pub fn set_num_nodes(mut self, nodes: usize) -> Self {
         self.num_nodes = nodes;
@@ -1890,9 +2168,9 @@ impl<
     }
 
     /// Sets the number of edges of the graph.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `edges` - The amount of edges to set.
     pub fn set_num_edges(mut self, edges: usize) -> Self {
         self.num_edges = edges;
@@ -1901,7 +2179,9 @@ impl<
     }
 
     /// Constructs the BVGraph object.
-    pub fn build(self) -> BVGraph<
+    pub fn build(
+        self,
+    ) -> BVGraph<
         InBlockCoding,
         InBlockCountCoding,
         InOutdegreeCoding,
@@ -1918,22 +2198,34 @@ impl<
         OutResidualCoding,
     > {
         BVGraph::<
-        InBlockCoding, InBlockCountCoding, InOutdegreeCoding, InOffsetCoding, InReferenceCoding, InIntervalCoding, InResidualCoding, 
-        OutBlockCoding, OutBlockCountCoding, OutOutdegreeCoding, OutOffsetCoding, OutReferenceCoding, OutIntervalCoding, OutResidualCoding
-        > { 
-            n: self.num_nodes, 
-            m: self.num_edges, 
-            graph_memory: self.loaded_graph, 
+            InBlockCoding,
+            InBlockCountCoding,
+            InOutdegreeCoding,
+            InOffsetCoding,
+            InReferenceCoding,
+            InIntervalCoding,
+            InResidualCoding,
+            OutBlockCoding,
+            OutBlockCountCoding,
+            OutOutdegreeCoding,
+            OutOffsetCoding,
+            OutReferenceCoding,
+            OutIntervalCoding,
+            OutResidualCoding,
+        > {
+            n: self.num_nodes,
+            m: self.num_edges,
+            graph_memory: self.loaded_graph,
             offsets: self.loaded_offsets,
             graph_binary_wrapper: RefCell::new(self.graph_binary_wrapper),
             outdegrees_binary_wrapper: RefCell::new(self.outdegrees_binary_wrapper),
-            cached_node: Cell::new(self.cached_node), 
-            cached_outdegree: Cell::new(self.cached_outdegree), 
-            cached_ptr: Cell::new(self.cached_ptr), 
-            in_max_ref_count: self.in_max_ref_count, 
+            cached_node: Cell::new(self.cached_node),
+            cached_outdegree: Cell::new(self.cached_outdegree),
+            cached_ptr: Cell::new(self.cached_ptr),
+            in_max_ref_count: self.in_max_ref_count,
             in_window_size: self.in_window_size,
             in_min_interval_len: self.in_min_interval_len,
-            out_max_ref_count: self.out_max_ref_count, 
+            out_max_ref_count: self.out_max_ref_count,
             out_window_size: self.out_window_size,
             out_min_interval_len: self.out_min_interval_len,
             in_zeta_k: self.in_zeta_k,
